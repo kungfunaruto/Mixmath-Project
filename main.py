@@ -75,7 +75,7 @@ class Tile:
 # ---------------- Game State ----------------
 game_started = False
 score = 0
-time_left = 100
+time_left = 5
 level = 1
 level_index = 0
 tiles = []
@@ -87,11 +87,15 @@ RESET_BUTTON = Button(270, HEIGHT//2-100, 120, 40, "Reset")
 SKIP_BUTTON = Button(WIDTH-200, HEIGHT-500, 150, 50, "Skip")
 
 # ---------------- Load Questions per Level ----------------
-LEVEL_QUESTIONS = {}
-for lvl in QUESTIONS_BY_LEVEL:
-    LEVEL_QUESTIONS[lvl] = get_questions_for_level(lvl)
+def start_button():
+    LEVEL_QUESTIONS = {}
+    for lvl in QUESTIONS_BY_LEVEL:
+        LEVEL_QUESTIONS[lvl] = get_questions_for_level(lvl)
+    return LEVEL_QUESTIONS
+
     
-def load_question():
+def load_question(LEVEL_QUESTIONS):
+    
     global tiles, answers, answer_slots, level_index
     q = LEVEL_QUESTIONS[level]
     if level_index >= len(q):
@@ -123,6 +127,25 @@ def show_game_over():
                 if BACK_BUTTON.is_clicked(event.pos):
                     waiting=False
 
+# GOD OF MATH SCREEN
+
+def show_god_of_math():
+    save_score(score)
+    waiting = True
+    BACK_BUTTON = Button(WIDTH//2-100, HEIGHT//2+60, 200, 60, "Back to Menu")
+    while waiting:
+        screen.fill(WHITE)
+        draw_text("GOD OF MATH", WIDTH/2, HEIGHT/2 - 40, (255,165,0), center=True)  # สีทอง
+        draw_text(f"Final Score: {score}", WIDTH/2, HEIGHT/2 + 20, BLACK, center=True)
+        BACK_BUTTON.draw()
+        pygame.display.update()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if BACK_BUTTON.is_clicked(event.pos):
+                    waiting=False
+    
 # ---------------- Main Loop ----------------
 while True:
     dt = clock.tick(60)/1000
@@ -134,8 +157,9 @@ while True:
             if not game_started:
                 if START_BUTTON.is_clicked(pos):
                     game_started=True
-                    score=0; time_left=60; level=1; level_index=0
-                    load_question()
+                    score=0; level=1; level_index=0
+                    LEVEL_QUESTIONS = start_button()
+                    load_question(LEVEL_QUESTIONS)
                 if RESET_BUTTON.is_clicked(pos):
                     reset_scores()
                 continue
@@ -156,26 +180,31 @@ while True:
             # Skip
             if SKIP_BUTTON.is_clicked(pos):
                 time_left -= 10
-                load_question()
+                load_question(LEVEL_QUESTIONS)
 
     # ---------------- Game Logic ----------------
     if game_started:
+        if score >= 50:
+            show_god_of_math()
+            game_started=False
+            
         time_left -= dt
         if time_left <=0:
             show_game_over()
             game_started=False
+            
         if all(a is not None for a in answers):
             tokens = [a.text for a in answers]
             if check_equation(tokens):
                 score +=1
-                time_left +=5
+                time_left +=3
                 # เปลี่ยนเลเวลตามคะแนนจริง
                 if score >=40: level=5
                 elif score >=30: level=4
                 elif score >=20: level=3
                 elif score >=10: level=2
                 else: level=1
-                load_question()
+                load_question(LEVEL_QUESTIONS)
 
     # ---------------- Render ----------------
     screen.fill(WHITE)
