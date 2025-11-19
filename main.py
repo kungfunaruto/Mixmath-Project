@@ -1,423 +1,202 @@
-# mixmath_pygame.py
-import pygame
-import sys
-import math
+import pygame, sys, os, json
+from logic import check_equation
+from questions import QUESTIONS_BY_LEVEL, get_questions_for_level
 
-# ---------- CONFIG ----------
-WINDOW_W, WINDOW_H = 1000, 600
-FPS = 60
-SLOT_COUNT = 9  # จำนวนช่องสำหรับวางสมการ (ปรับได้ per level)
-FONT_NAME = None
-BG_COLOR = (245, 245, 250)
-SLOT_COLOR = (230, 230, 235)
-TILE_COLOR = (255, 255, 255)
-TILE_BORDER = (40, 40, 40)
-GOOD_COLOR = (180, 245, 180)
-BAD_COLOR = (255, 200, 200)
+pygame.init()
 
-# ---------- LEVELS: define tiles per level ----------
-LEVELS = [
-    # level 1 - easy (8 ตัว)
-    ["1", "2", "3", "+", "-", "=", "4", "5"],
-    # level 2 - medium (9 ตัว)
-    ["10", "+", "2", "=", "5", "*", "1", "0", "-"],
-    # level 3 - harder (9 ตัว)
-    ["3", "5", "=", "*", "2", "7", "+", "1", "/"],
-    # level 4 - custom mix
-    ["12", "=", "3", "*", "4", "+", "6", "-", "2"],
-]
+WIDTH, HEIGHT = 900, 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("A-Math Game")
 
-# ---------- SAFE EXPRESSION PARSE & EVAL ----------
-# We'll implement tokenization, shunting-yard to RPN, then evaluate RPN.
-# Supported tokens: integers (multi-digit), + - * /
-# Division uses true division; compare LHS and RHS with tolerance.
+FONT = pygame.font.SysFont("Arial", 36)
+SMALL = pygame.font.SysFont("Arial", 28)
 
-def tokenize(expr):
-    tokens = []
-    i = 0
-    s = expr.replace(" ", "")
-    while i < len(s):
-        c = s[i]
-        if c.isdigit():
-            j = i+1
-            while j < len(s) and s[j].isdigit():
-                j += 1
-            tokens.append(s[i:j])
-            i = j
-        elif c in "+-*/()":
-            tokens.append(c)
-            i += 1
-        else:
-            # invalid char
-            return None
-    return tokens
+WHITE = (255,255,255)
+BLACK = (0,0,0)
+GRAY = (200,200,200)
+BLUE = (80,150,255)
+GREEN = (50,200,90)
+RED = (220,50,50)
 
-_prec = {"+":1, "-":1, "*":2, "/":2}
+clock = pygame.time.Clock()
+SCORES_FILE = "scores.json"
 
-def to_rpn(tokens):
-    out = []
-    stack = []
-    for t in tokens:
-        if t.isdigit():
-            out.append(t)
-        elif t in _prec:
-            while stack and stack[-1] in _prec and _prec[stack[-1]] >= _prec[t]:
-                out.append(stack.pop())
-            stack.append(t)
-        elif t == "(":
-            stack.append(t)
-        elif t == ")":
-            while stack and stack[-1] != "(":
-                out.append(stack.pop())
-            if not stack:
-                return None
-            stack.pop()
-        else:
-            return None
-    while stack:
-        if stack[-1] in "()":
-            return None
-        out.append(stack.pop())
-    return out
+# ---------------- Scoreboard ----------------
+def load_scores():
+    if os.path.exists(SCORES_FILE):
+        with open(SCORES_FILE,"r") as f:
+            return json.load(f)
+    return []
 
-def eval_rpn(rpn):
-    try:
-        st = []
-        for t in rpn:
-            if t.isdigit():
-                st.append(float(t))
-            else:
-                if len(st) < 2:
-                    return None
-                b = st.pop()
-                a = st.pop()
-                if t == "+":
-                    st.append(a + b)
-                elif t == "-":
-                    st.append(a - b)
-                elif t == "*":
-                    st.append(a * b)
-                elif t == "/":
-                    if abs(b) < 1e-9:
-                        return None
-                    st.append(a / b)
-                else:
-                    return None
-        if len(st) != 1:
-            return None
-        return st[0]
-    except Exception:
-        return None
+def save_score(score):
+    scores = load_scores()
+    scores.append(score)
+    scores = sorted(scores, reverse=True)[:10]
+    with open(SCORES_FILE,"w") as f:
+        json.dump(scores,f)
 
-def safe_eval(expr):
-    # returns float or None on invalid
-    tokens = tokenize(expr)
-    if tokens is None:
-        return None
-    rpn = to_rpn(tokens)
-    if rpn is None:
-        return None
-    return eval_rpn(rpn)
+def reset_scores():
+    if os.path.exists(SCORES_FILE):
+        os.remove(SCORES_FILE)
 
-def check_equation(expr):
-    # expr string must contain exactly one '='
-    if expr.count("=") != 1:
-        return False, "สมการต้องมีเครื่องหมาย '=' เพียงตัวเดียว"
-    left, right = expr.split("=", 1)
-    if left.strip() == "" or right.strip() == "":
-        return False, "ฝั่งซ้ายหรือขวาว่าง"
-    lv = safe_eval(left)
-    rv = safe_eval(right)
-    if lv is None or rv is None:
-        return False, "รูปแบบสมการไม่ถูกต้อง"
-    if math.isclose(lv, rv, rel_tol=1e-9, abs_tol=1e-6):
-        return True, f"ถูกต้อง: {left} = {right} -> {lv:.6g}"
+# ---------------- Utility ----------------
+def draw_text(text,x,y,color=BLACK,center=False,font=FONT):
+    surface = font.render(text,True,color)
+    rect = surface.get_rect()
+    if center:
+        rect.center = (x,y)
     else:
-        return False, f"ไม่เท่ากัน: {lv} ≠ {rv}"
+        rect.topleft = (x,y)
+    screen.blit(surface,rect)
 
-# ---------- PYGAME UI CLASSES ----------
+class Button:
+    def __init__(self,x,y,w,h,text):
+        self.rect = pygame.Rect(x,y,w,h)
+        self.text = text
+    def draw(self,color=BLUE):
+        pygame.draw.rect(screen,color,self.rect,border_radius=12)
+        draw_text(self.text,self.rect.centerx,self.rect.centery,WHITE,center=True)
+    def is_clicked(self,pos):
+        return self.rect.collidepoint(pos)
+
 class Tile:
-    def __init__(self, text, pos):
-        self.text = str(text)
-        self.rect = pygame.Rect(pos[0], pos[1], 76, 76)
-        self.dragging = False
-        self.offset = (0,0)
-        self.origin = pos
-        self.in_slot = None  # index of slot if placed
+    def __init__(self,text,x,y):
+        self.text = text
+        self.rect = pygame.Rect(x,y,70,70)
+        self.original = (x,y)
+        self.in_answer_slot = False
+    def draw(self):
+        pygame.draw.rect(screen,GRAY,self.rect,border_radius=10)
+        draw_text(self.text,self.rect.centerx,self.rect.centery,BLACK,center=True)
+    def reset(self):
+        self.rect.topleft = self.original
+        self.in_answer_slot = False
 
-    def draw(self, surf, font, border_color=TILE_BORDER):
-        pygame.draw.rect(surf, TILE_COLOR, self.rect, border_radius=8)
-        pygame.draw.rect(surf, border_color, self.rect, 2, border_radius=8)
-        txt = font.render(self.text, True, (10,10,10))
-        tx = txt.get_width()
-        ty = txt.get_height()
-        surf.blit(txt, (self.rect.centerx - tx//2, self.rect.centery - ty//2))
+# ---------------- Game State ----------------
+game_started = False
+score = 0
+time_left = 100
+level = 1
+level_index = 0
+tiles = []
+answers = []
+answer_slots = []
 
-    def update_position(self, pos):
-        self.rect.topleft = (pos[0] - self.offset[0], pos[1] - self.offset[1])
+START_BUTTON = Button(50, HEIGHT//2-120, 200, 60, "Start Game")
+RESET_BUTTON = Button(270, HEIGHT//2-100, 120, 40, "Reset")
+SKIP_BUTTON = Button(WIDTH-200, HEIGHT-500, 150, 50, "Skip")
 
-    def reset_origin(self):
-        self.rect.topleft = self.origin
+# ---------------- Load Questions per Level ----------------
+LEVEL_QUESTIONS = {}
+for lvl in QUESTIONS_BY_LEVEL:
+    LEVEL_QUESTIONS[lvl] = get_questions_for_level(lvl)
+    
+def load_question():
+    global tiles, answers, answer_slots, level_index
+    q = LEVEL_QUESTIONS[level]
+    if level_index >= len(q):
+        level_index = 0
+    cur_q = q[level_index]
+    level_index += 1
+    tiles.clear(); answers.clear(); answer_slots.clear()
+    answers.extend([None]*len(cur_q))
+    start_x = WIDTH//2 - (len(cur_q)*80)//2
+    for i,t in enumerate(cur_q):
+        tiles.append(Tile(t,start_x+i*80,450))
+        answer_slots.append(pygame.Rect(start_x+i*80,250,70,70))
 
-class Slot:
-    def __init__(self, idx, rect):
-        self.idx = idx
-        self.rect = rect
-        self.tile = None  # Tile assigned
+# ---------------- Game Over ----------------
+def show_game_over():
+    save_score(score)
+    waiting = True
+    BACK_BUTTON = Button(WIDTH//2-100, HEIGHT//2+60, 200, 60, "Back to Menu")
+    while waiting:
+        screen.fill(WHITE)
+        draw_text("Time's Up!", WIDTH//2, HEIGHT//2-60, RED, center=True, font=FONT)
+        draw_text(f"Score: {score}", WIDTH//2, HEIGHT//2, BLACK, center=True, font=SMALL)
+        BACK_BUTTON.draw()
+        pygame.display.update()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if BACK_BUTTON.is_clicked(event.pos):
+                    waiting=False
 
-    def draw(self, surf, font, highlight=False, good=None):
-        color = SLOT_COLOR
-        pygame.draw.rect(surf, color, self.rect, border_radius=6)
-        pygame.draw.rect(surf, (120,120,120), self.rect, 2, border_radius=6)
-        if highlight:
-            pygame.draw.rect(surf, (80,160,240), self.rect, 4, border_radius=6)
-        if good is not None:
-            # pass True/False to show green/red overlay
-            overlay = GOOD_COLOR if good else BAD_COLOR
-            s = pygame.Surface((self.rect.w, self.rect.h), pygame.SRCALPHA)
-            s.fill((*overlay, 70))
-            surf.blit(s, self.rect.topleft)
-        if self.tile:
-            # draw tile centered in slot
-            trect = self.tile.rect
-            # draw tile with same size as slot for neatness:
-            temp = pygame.Rect(self.rect.left + 6, self.rect.top + 6, self.rect.w - 12, self.rect.h - 12)
-            pygame.draw.rect(surf, TILE_COLOR, temp, border_radius=6)
-            pygame.draw.rect(surf, TILE_BORDER, temp, 2, border_radius=6)
-            txt = font.render(self.tile.text, True, (10,10,10))
-            surf.blit(txt, (temp.centerx - txt.get_width()//2, temp.centery - txt.get_height()//2))
+# ---------------- Main Loop ----------------
+while True:
+    dt = clock.tick(60)/1000
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit(); sys.exit()
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            pos = event.pos
+            if not game_started:
+                if START_BUTTON.is_clicked(pos):
+                    game_started=True
+                    score=0; time_left=60; level=1; level_index=0
+                    load_question()
+                if RESET_BUTTON.is_clicked(pos):
+                    reset_scores()
+                continue
+            # คลิก Tile
+            for tile in tiles:
+                if tile.rect.collidepoint(pos) and not tile.in_answer_slot:
+                    for i in range(len(answer_slots)):
+                        if answers[i] is None:
+                            answers[i]=tile
+                            tile.rect.topleft=answer_slots[i].topleft
+                            tile.in_answer_slot=True
+                            break
+            # คลิก Tile ในคำตอบคืน
+            for i,tile in enumerate(answers):
+                if tile and tile.rect.collidepoint(pos):
+                    tile.reset()
+                    answers[i]=None
+            # Skip
+            if SKIP_BUTTON.is_clicked(pos):
+                time_left -= 10
+                load_question()
 
-# ---------- GAME ----------
-class MixMathGame:
-    def __init__(self):
-        pygame.init()
-        pygame.display.set_caption("MIXMATH - ท้าคิดเลขไว")
-        self.screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
-        self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont(FONT_NAME, 28)
-        self.bigfont = pygame.font.SysFont(FONT_NAME, 36, bold=True)
+    # ---------------- Game Logic ----------------
+    if game_started:
+        time_left -= dt
+        if time_left <=0:
+            show_game_over()
+            game_started=False
+        if all(a is not None for a in answers):
+            tokens = [a.text for a in answers]
+            if check_equation(tokens):
+                score +=1
+                time_left +=5
+                # เปลี่ยนเลเวลตามคะแนนจริง
+                if score >=40: level=5
+                elif score >=30: level=4
+                elif score >=20: level=3
+                elif score >=10: level=2
+                else: level=1
+                load_question()
 
-        self.level_idx = 0
-        self.load_level(self.level_idx)
-
-        self.msg = ""
-        self.msg_color = (20,20,20)
-        self.last_check_result = None  # True/False/None
-
-    def load_level(self, idx):
-        self.tiles = []
-        self.slots = []
-        self.last_check_result = None
-        self.msg = f"ด่าน {idx+1}"
-        tile_texts = LEVELS[idx % len(LEVELS)]
-        # create tile objects in tile bank area
-        start_x = 60
-        start_y = 120
-        gap = 90
-        for i, t in enumerate(tile_texts):
-            x = start_x + (i % 6) * gap
-            y = start_y + (i // 6) * gap
-            tile = Tile(t, (x, y))
-            self.tiles.append(tile)
-
-        # create slots centered near bottom
-        total_w = SLOT_COUNT * 88
-        base_x = (WINDOW_W - total_w) // 2
-        y = WINDOW_H - 160
-        for i in range(SLOT_COUNT):
-            r = pygame.Rect(base_x + i*88, y, 80, 80)
-            self.slots.append(Slot(i, r))
-
-        # clear tiles assignment
-        for t in self.tiles:
-            t.in_slot = None
-            t.origin = t.rect.topleft
-
-    def get_tile_at_pos(self, pos):
-        # iterate from top (last drawn) to bottom
-        for t in reversed(self.tiles):
-            if t.rect.collidepoint(pos):
-                return t
-        return None
-
-    def get_slot_at_pos(self, pos):
-        for s in self.slots:
-            if s.rect.collidepoint(pos):
-                return s
-        return None
-
-    def all_slots_text(self):
-        # join tile texts in slot order (empty slots as '')
-        parts = []
-        for s in self.slots:
-            if s.tile:
-                parts.append(s.tile.text)
-            else:
-                parts.append("")
-        # create expression by concatenating non-empty sequentially (we'll treat empty slots as separators)
-        expr = "".join([p for p in parts if p != ""])
-        return expr, parts
-
-    def handle_check(self):
-        expr, parts = self.all_slots_text()
-        ok, message = check_equation(expr)
-        self.msg = message
-        self.last_check_result = ok
-        self.msg_color = (0,120,0) if ok else (180,20,20)
-
-    def place_tile_in_slot(self, tile, slot):
-        # if slot has tile, swap positions
-        if slot.tile:
-            other = slot.tile
-            # put other back to tile's origin (or to tile's prior slot)
-            if tile.in_slot is not None:
-                # swap positions: tile goes to this slot, other to tile.in_slot
-                prev_slot = self.slots[tile.in_slot]
-                prev_slot.tile = other
-                other.in_slot = prev_slot.idx
-                # set tile to new slot
-                slot.tile = tile
-                tile.in_slot = slot.idx
-            else:
-                # tile came from bank: move other to bank origin
-                other.in_slot = None
-                other.reset_origin()
-                slot.tile = tile
-                tile.in_slot = slot.idx
-        else:
-            # empty slot
-            if tile.in_slot is not None:
-                prev_slot = self.slots[tile.in_slot]
-                prev_slot.tile = None
-            slot.tile = tile
-            tile.in_slot = slot.idx
-        # snap tile rect to slot
-        if tile.in_slot is not None:
-            tile.rect.topleft = (slot.rect.left + 6, slot.rect.top + 6)
-            tile.origin = tile.rect.topleft
-        else:
-            tile.reset_origin()
-
-    def run(self):
-        selected_tile = None
-        running = True
-        drag_offset = (0,0)
-        while running:
-            dt = self.clock.tick(FPS)
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-                    break
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    pos = pygame.mouse.get_pos()
-                    tile = self.get_tile_at_pos(pos)
-                    if tile:
-                        # start dragging
-                        selected_tile = tile
-                        tile.dragging = True
-                        tile.offset = (pos[0] - tile.rect.left, pos[1] - tile.rect.top)
-                        # if it was in a slot, remove from slot temporarily
-                        if tile.in_slot is not None:
-                            s = self.slots[tile.in_slot]
-                            s.tile = None
-                            tile.in_slot = None
-                    else:
-                        # click on slot to do click-swap (if no drag)
-                        s = self.get_slot_at_pos(pos)
-                        if s:
-                            # find currently selected via previous click? We'll implement click-select: if no tile selected, pick tile from bank by clicking on it (tile-click is above). So here nothing.
-                            pass
-                elif event.type == pygame.MOUSEBUTTONUP:
-                    pos = pygame.mouse.get_pos()
-                    if selected_tile:
-                        selected_tile.dragging = False
-                        # snap to slot if releasing over slot
-                        s = self.get_slot_at_pos(pos)
-                        if s:
-                            self.place_tile_in_slot(selected_tile, s)
-                        else:
-                            # not over a slot: return to origin (bank)
-                            selected_tile.reset_origin()
-                            selected_tile.in_slot = None
-                        selected_tile = None
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_RETURN:
-                        self.handle_check()
-                    elif event.key == pygame.K_n:
-                        # next level
-                        self.level_idx = (self.level_idx + 1) % len(LEVELS)
-                        self.load_level(self.level_idx)
-
-            # handle mouse clicks as swap when not dragging:
-            if pygame.mouse.get_pressed()[0]:
-                # if clicked but not dragging a tile, implement click-select-swap:
-                # We'll allow quick-click: click a tile to pick up, then click a slot to place/swap. For simplicity, above MOUSEBUTTONDOWN handled picks.
-                pass
-
-            # update drag movement
-            for t in self.tiles:
-                if t.dragging:
-                    t.update_position(pygame.mouse.get_pos())
-
-            # DRAW
-            self.screen.fill(BG_COLOR)
-            # Title
-            title = self.bigfont.render("MIXMATH - ท้าคิดเลขไว (drag / click เพื่อวาง)", True, (20,20,20))
-            self.screen.blit(title, (30, 20))
-
-            # draw tile bank label
-            bank_label = self.font.render("Tile bank", True, (30,30,30))
-            self.screen.blit(bank_label, (60, 90))
-
-            # draw tiles (bank)
-            for t in self.tiles:
-                # if tile is placed in slot we don't draw it here (slot draws tile)
-                if t.in_slot is None:
-                    t.draw(self.screen, self.font)
-            # draw slots
-            mouse_pos = pygame.mouse.get_pos()
-            for s in self.slots:
-                highlight = s.rect.collidepoint(mouse_pos)
-                good = None
-                if self.last_check_result is not None:
-                    good = self.last_check_result
-                s.draw(self.screen, self.font, highlight=highlight, good=good)
-
-            # draw tiles that are in slots (so they appear above slot)
-            for s in self.slots:
-                if s.tile:
-                    # ensure tile rect aligns with slot
-                    s.tile.rect.topleft = (s.rect.left + 6, s.rect.top + 6)
-                    s.tile.draw(self.screen, self.font)
-
-            # draw UI buttons (simple rectangles)
-            # Check button
-            check_rect = pygame.Rect(WINDOW_W - 220, 90, 180, 48)
-            pygame.draw.rect(self.screen, (220,220,240), check_rect, border_radius=8)
-            pygame.draw.rect(self.screen, (100,100,160), check_rect, 2, border_radius=8)
-            check_txt = self.font.render("ตรวจสอบ (Enter)", True, (10,10,10))
-            self.screen.blit(check_txt, (check_rect.left + 14, check_rect.top + 10))
-
-            # Next level button
-            next_rect = pygame.Rect(WINDOW_W - 220, 150, 180, 48)
-            pygame.draw.rect(self.screen, (220,240,220), next_rect, border_radius=8)
-            pygame.draw.rect(self.screen, (80,130,80), next_rect, 2, border_radius=8)
-            next_txt = self.font.render("ด่านถัดไป (N)", True, (10,10,10))
-            self.screen.blit(next_txt, (next_rect.left + 18, next_rect.top + 10))
-
-            # instructions
-            ins1 = self.font.render("ลากหรือต้องคลิกเพื่อย้ายตัวเบี้ยไปที่ช่อง แล้วกด Enter เพื่อตรวจสอบ", True, (40,40,40))
-            self.screen.blit(ins1, (30, WINDOW_H - 40))
-
-            # status message
-            msg_surf = self.font.render(self.msg, True, self.msg_color)
-            self.screen.blit(msg_surf, (30, 70))
-
-            pygame.display.flip()
-
-        pygame.quit()
-        sys.exit()
-
-if __name__ == "__main__":
-    game = MixMathGame()
-    game.run()
+    # ---------------- Render ----------------
+    screen.fill(WHITE)
+    if not game_started:
+        draw_text("A-Math Game", WIDTH//2, 60, BLACK, center=True, font=FONT)
+        START_BUTTON.draw()
+        RESET_BUTTON.draw(color=RED)
+        # Scoreboard ชิดขวา
+        sb_rect = pygame.Rect(WIDTH-250, 100, 220, 350)
+        pygame.draw.rect(screen, GRAY, sb_rect, border_radius=12)
+        pygame.draw.rect(screen, BLACK, sb_rect, width=3, border_radius=12)
+        draw_text("Scoreboard", sb_rect.left+20, sb_rect.top+10, BLACK, font=SMALL)
+        scores = load_scores()
+        for i,s in enumerate(scores):
+            draw_text(f"{i+1}. {s}", sb_rect.centerx, sb_rect.top+50+i*30, BLACK, center=True, font=SMALL)
+    else:
+        draw_text(f"Score: {score}  Level: {level}", 50, 30)
+        draw_text(f"Time: {int(time_left)}", WIDTH-190, 30)
+        for slot in answer_slots:
+            pygame.draw.rect(screen, BLUE, slot, width=3, border_radius=10)
+        SKIP_BUTTON.draw(RED)
+        for tile in tiles:
+            tile.draw()
+    pygame.display.update()
