@@ -3,7 +3,7 @@ import random
 # -----------------------------------------
 # ตัวอย่างคำถาม
 # -----------------------------------------
-QUESTIONS_BY_LEVEL = {
+QUESTIONS_LEVEL = {
     1: [  # เลเวล 1: 5 ตัวเบี้ย
         ["2","2","4","+","="],
         ["1","5","6","+","="],
@@ -108,13 +108,13 @@ QUESTIONS_BY_LEVEL = {
 
 # ------------------- สุ่มคำถามแต่ละเลเวลไม่ซ้ำ -------------------
 def get_questions_for_level(level):
-    level_questions = QUESTIONS_BY_LEVEL[level].copy()
+    level_questions = QUESTIONS_LEVEL[level].copy()
     random.shuffle(level_questions)
     return level_questions[:10]
 
 # ------------------- จัดเรียงตามเลเวล (1→5) -------------------
 def get_ordered_questions():
     questions_ordered = []
-    for level in sorted(QUESTIONS_BY_LEVEL.keys()):
+    for level in sorted(QUESTIONS_LEVEL.keys()):
         questions_ordered.extend(get_questions_for_level(level))
     return questions_ordered

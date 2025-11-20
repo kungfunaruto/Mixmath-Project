@@ -7,15 +7,9 @@ def safe_eval(expr):
         return None
 
 def is_valid_expression(expr):
-    """
-    ตรวจสอบว่าเป็นสมการเลขธรรมดา ไม่มี //, **, %, ตัวหนังสือ, หรือ double operator เช่น ++, --, **, //
-    """
-    # ห้ามตัวอักษร
-    if re.search(r"[A-Za-z]", expr):
-        return False
     
     # ห้าม operator ที่ไม่อนุญาต
-    if "**" in expr or "//" in expr or "%" in expr:
+    if "**" in expr or "//" in expr :
         return False
 
     # ห้าม ++, --, +-*/ ผิดรูป
@@ -25,11 +19,6 @@ def is_valid_expression(expr):
     return True
 
 def check_equation(tokens):
-    """
-    รองรับเครื่องหมาย x / ÷ และ '=' หลายตัว เช่น:
-    1 + 1 = 2 = 2
-    12 x 3 = 36 = 36
-    """
     # รวมเป็นสตริง
     expr = "".join(tokens)
 

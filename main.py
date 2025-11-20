@@ -1,15 +1,23 @@
 import pygame, sys, os, json
 from logic import check_equation
-from questions import QUESTIONS_BY_LEVEL, get_questions_for_level
+from questions import QUESTIONS_LEVEL, get_questions_for_level
 
 pygame.init()
 
-WIDTH, HEIGHT = 900, 600
+WIDTH, HEIGHT = 850, 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("A-Math Game")
 
-FONT = pygame.font.SysFont("Arial", 36)
+FONT = pygame.font.Font("materials/myfont.ttf", 28)
 SMALL = pygame.font.SysFont("Arial", 28)
+
+background_img = pygame.image.load('materials/bg.jpg')
+
+#sound fx
+skip_sfx = pygame.mixer.Sound('materials/skip.mp3')
+start_sfx = pygame.mixer.Sound('materials/start.wav')
+gameover_sfx = pygame.mixer.Sound('materials/over.wav')
+tiles_sfx = pygame.mixer.Sound('materials/tiles.wav')
 
 WHITE = (255,255,255)
 BLACK = (0,0,0)
@@ -21,7 +29,7 @@ RED = (220,50,50)
 clock = pygame.time.Clock()
 SCORES_FILE = "scores.json"
 
-# ---------------- Scoreboard ----------------
+# - Scoreboard - 
 def load_scores():
     if os.path.exists(SCORES_FILE):
         with open(SCORES_FILE,"r") as f:
@@ -39,7 +47,7 @@ def reset_scores():
     if os.path.exists(SCORES_FILE):
         os.remove(SCORES_FILE)
 
-# ---------------- Utility ----------------
+# ---------------- Utilityของเกม ----------------
 def draw_text(text,x,y,color=BLACK,center=False,font=FONT):
     surface = font.render(text,True,color)
     rect = surface.get_rect()
@@ -75,21 +83,21 @@ class Tile:
 # ---------------- Game State ----------------
 game_started = False
 score = 0
-time_left = 5
+time = 60
 level = 1
 level_index = 0
 tiles = []
 answers = []
 answer_slots = []
 
-START_BUTTON = Button(50, HEIGHT//2-120, 200, 60, "Start Game")
-RESET_BUTTON = Button(270, HEIGHT//2-100, 120, 40, "Reset")
+START_BUTTON = Button(325, HEIGHT//2-120, 200, 60, "Start Game")
+RESET_BUTTON = Button(675, 475, 120, 40, "Reset")
 SKIP_BUTTON = Button(WIDTH-200, HEIGHT-500, 150, 50, "Skip")
 
-# ---------------- Load Questions per Level ----------------
+# ---------------- สุ่มโจทย์ปัญหา ----------------
 def start_button():
     LEVEL_QUESTIONS = {}
-    for lvl in QUESTIONS_BY_LEVEL:
+    for lvl in QUESTIONS_LEVEL:
         LEVEL_QUESTIONS[lvl] = get_questions_for_level(lvl)
     return LEVEL_QUESTIONS
 
@@ -97,20 +105,21 @@ def start_button():
 def load_question(LEVEL_QUESTIONS):
     
     global tiles, answers, answer_slots, level_index
-    q = LEVEL_QUESTIONS[level]
-    if level_index >= len(q):
+    a = LEVEL_QUESTIONS[level]
+    if level_index >= len(a):
         level_index = 0
-    cur_q = q[level_index]
+    eq = a[level_index]
     level_index += 1
     tiles.clear(); answers.clear(); answer_slots.clear()
-    answers.extend([None]*len(cur_q))
-    start_x = WIDTH//2 - (len(cur_q)*80)//2
-    for i,t in enumerate(cur_q):
+    answers.extend([None]*len(eq))
+    start_x = WIDTH//2 - (len(eq)*80)//2
+    for i,t in enumerate(eq):
         tiles.append(Tile(t,start_x+i*80,450))
         answer_slots.append(pygame.Rect(start_x+i*80,250,70,70))
 
-# ---------------- Game Over ----------------
+# ---------------- Game Over เกมจบ(เวลาหมด) ----------------
 def show_game_over():
+    gameover_sfx.play()     #เสียง
     save_score(score)
     waiting = True
     BACK_BUTTON = Button(WIDTH//2-100, HEIGHT//2+60, 200, 60, "Back to Menu")
@@ -127,7 +136,7 @@ def show_game_over():
                 if BACK_BUTTON.is_clicked(event.pos):
                     waiting=False
 
-# GOD OF MATH SCREEN
+# คะแนนเกิน 50 แสดง god of math
 
 def show_god_of_math():
     save_score(score)
@@ -156,8 +165,9 @@ while True:
             pos = event.pos
             if not game_started:
                 if START_BUTTON.is_clicked(pos):
+                    start_sfx.play()    #เสียง
                     game_started=True
-                    score=0; level=1; level_index=0
+                    score=0; level=1; time_left = time; level_index=0
                     LEVEL_QUESTIONS = start_button()
                     load_question(LEVEL_QUESTIONS)
                 if RESET_BUTTON.is_clicked(pos):
@@ -166,6 +176,7 @@ while True:
             # คลิก Tile
             for tile in tiles:
                 if tile.rect.collidepoint(pos) and not tile.in_answer_slot:
+                    tiles_sfx.play()   #เสียง
                     for i in range(len(answer_slots)):
                         if answers[i] is None:
                             answers[i]=tile
@@ -179,6 +190,7 @@ while True:
                     answers[i]=None
             # Skip
             if SKIP_BUTTON.is_clicked(pos):
+                skip_sfx.play() #เสียง
                 time_left -= 10
                 load_question(LEVEL_QUESTIONS)
 
@@ -198,7 +210,7 @@ while True:
             if check_equation(tokens):
                 score +=1
                 time_left +=3
-                # เปลี่ยนเลเวลตามคะแนนจริง
+                # เปลี่ยนเลเวล
                 if score >=40: level=5
                 elif score >=30: level=4
                 elif score >=20: level=3
@@ -208,6 +220,9 @@ while True:
 
     # ---------------- Render ----------------
     screen.fill(WHITE)
+    
+    screen.blit(background_img, (0, 0))
+    
     if not game_started:
         draw_text("A-Math Game", WIDTH//2, 60, BLACK, center=True, font=FONT)
         START_BUTTON.draw()
@@ -224,7 +239,7 @@ while True:
         draw_text(f"Score: {score}  Level: {level}", 50, 30)
         draw_text(f"Time: {int(time_left)}", WIDTH-190, 30)
         for slot in answer_slots:
-            pygame.draw.rect(screen, BLUE, slot, width=3, border_radius=10)
+            pygame.draw.rect(screen, (247 ,225 ,56), slot, width=3, border_radius=10)
         SKIP_BUTTON.draw(RED)
         for tile in tiles:
             tile.draw()
